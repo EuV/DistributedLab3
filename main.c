@@ -8,12 +8,12 @@ timestamp_t get_lamport_time() {
 }
 
 
-void inc_lamport_time() {
+void incLamportTime() {
 	lamportTime++;
 }
 
 
-void set_max_lamport_time( timestamp_t msgTime ) {
+void setMaxLamportTime( timestamp_t msgTime ) {
 	if( lamportTime < msgTime ) {
 		lamportTime = msgTime;
 	}
@@ -45,7 +45,7 @@ void accountService( Process * const proc ) {
 
 	closeUnusedPipes( proc );
 
-	inc_lamport_time();
+	incLamportTime();
 
 	// STARTED
 	Message startedMsg;
@@ -60,8 +60,8 @@ void accountService( Process * const proc ) {
 		Message msg;
 		receive_any( proc, &msg );
 
-		set_max_lamport_time( msg.s_header.s_local_time );
-		inc_lamport_time();
+		setMaxLamportTime( msg.s_header.s_local_time );
+		incLamportTime();
 
 		switch( msg.s_header.s_type ) {
 			case STARTED: {
@@ -77,7 +77,7 @@ void accountService( Process * const proc ) {
 
 				fastForwardHistory( proc, get_lamport_time() );
 
-				inc_lamport_time();
+				incLamportTime();
 
 				TransferOrder order;
 				memcpy( &order, msg.s_payload, msg.s_header.s_payload_len );
@@ -116,7 +116,7 @@ void accountService( Process * const proc ) {
 			case STOP: {
 				done++; // This one
 
-				inc_lamport_time();
+				incLamportTime();
 
 				Message doneMsg;
 				fillMessage( &doneMsg, proc, DONE );
@@ -140,7 +140,7 @@ void accountService( Process * const proc ) {
 	sprintf( LogBuf, log_received_all_done_fmt, get_lamport_time(), proc -> localId );
 	makeIPCLog( LogBuf );
 
-	inc_lamport_time();
+	incLamportTime();
 
 	Message historyMsg;
 	historyMsg.s_header.s_payload_len = 2 + sizeof( BalanceState ) * proc -> history.s_history_len;
@@ -174,8 +174,8 @@ void customerService( Process * const proc ) {
 		Message msg;
 		receive_any( proc, &msg );
 
-		set_max_lamport_time( msg.s_header.s_local_time );
-		inc_lamport_time();
+		setMaxLamportTime( msg.s_header.s_local_time );
+		incLamportTime();
 
 		switch( msg.s_header.s_type ) {
 			case STARTED: {
@@ -187,7 +187,7 @@ void customerService( Process * const proc ) {
 
 					bank_robbery( proc, proc -> total );
 
-					inc_lamport_time();
+					incLamportTime();
 
 					Message stopMsg;
 					fillMessage( &stopMsg, proc, STOP );
@@ -228,7 +228,7 @@ void customerService( Process * const proc ) {
 
 void transfer( void* parent_data, local_id src, local_id dst,  balance_t amount ) {
 
-	inc_lamport_time();
+	incLamportTime();
 
 	TransferOrder order = { src, dst, amount };
 	Message transferMsg;
@@ -239,8 +239,8 @@ void transfer( void* parent_data, local_id src, local_id dst,  balance_t amount 
 	Message msg;
 	while( receive( parent_data, dst, &msg ) == IPC_PIPE_IS_EMPTY ) {}
 
-	set_max_lamport_time( msg.s_header.s_local_time );
-	inc_lamport_time();
+	setMaxLamportTime( msg.s_header.s_local_time );
+	incLamportTime();
 
 	if( msg.s_header.s_type != ACK ) {
 		fprintf( stderr, "ACK is missing! Received %d instead of %d\n", msg.s_header.s_type, ACK );
