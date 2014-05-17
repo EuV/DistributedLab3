@@ -1,5 +1,21 @@
 #include "la3.h"
 
+timestamp_t lamportTime = 0;
+
+timestamp_t get_lamport_time() {
+	return lamportTime;
+}
+
+void inc_lamport_time() {
+	lamportTime++;
+}
+
+void set_max_lamport_time( timestamp_t msgTime ) {
+	if( lamportTime < msgTime ) {
+		lamportTime = msgTime;
+	}
+}
+
 int main( int argc, char* argv[] ) {
 
 	EventsLog = open( evengs_log, O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0777 );
@@ -25,6 +41,8 @@ void accountService( Process * const proc ) {
 
 	closeUnusedPipes( proc );
 
+	inc_lamport_time();
+
 	// STARTED
 	Message startedMsg;
 	fillMessage( &startedMsg, proc, STARTED );
@@ -34,36 +52,49 @@ void accountService( Process * const proc ) {
 	// Receive all the messages
 	int done = 0;
 	while( done != proc -> total ) {
+
 		Message msg;
 		receive_any( proc, &msg );
 
-		switch ( msg.s_header.s_type ) {
+		set_max_lamport_time( msg.s_header.s_local_time );
+		inc_lamport_time();
+
+		switch( msg.s_header.s_type ) {
 			case STARTED: {
 				static int started = 1;
 				started++;
 				if( started == proc -> total ) {
-					sprintf( LogBuf, log_received_all_started_fmt, get_physical_time(), proc -> localId );
+					sprintf( LogBuf, log_received_all_started_fmt, get_lamport_time(), proc -> localId );
 					makeIPCLog( LogBuf );
 				}
 				break;
 			}
 			case TRANSFER: {
-				fastForwardHistory( proc, msg.s_header.s_local_time + 1 );
+
+				fastForwardHistory( proc, get_lamport_time() );
+
+				inc_lamport_time();
 
 				TransferOrder order;
 				memcpy( &order, msg.s_payload, msg.s_header.s_payload_len );
 
 				// From (this) account
 				if( order.s_src == proc -> localId ) {
-					sprintf( LogBuf, log_transfer_out_fmt, get_physical_time(), proc -> localId, order.s_amount, order.s_dst );
+					sprintf( LogBuf, log_transfer_out_fmt, get_lamport_time(), proc -> localId, order.s_amount, order.s_dst );
 					proc -> balance -= order.s_amount;
+					msg.s_header.s_local_time = get_lamport_time();
 					send( proc, order.s_dst, &msg );
 				}
 
 				// To (this) account
 				else {
-					sprintf( LogBuf, log_transfer_in_fmt, get_physical_time(), proc -> localId, order.s_amount, order.s_src );
+					sprintf( LogBuf, log_transfer_in_fmt, get_lamport_time(), proc -> localId, order.s_amount, order.s_src );
 					proc -> balance += order.s_amount;
+
+					timestamp_t pendingFromTime = msg.s_header.s_local_time;
+					while( pendingFromTime < get_lamport_time() ) {
+						proc -> history.s_history[ pendingFromTime++ ].s_balance_pending_in = order.s_amount;
+					}
 
 					// Acknowledgement to the customer-process
 					Message ackMsg;
@@ -73,19 +104,21 @@ void accountService( Process * const proc ) {
 
 				makeIPCLog( LogBuf );
 
-				BalanceState state = { proc -> balance, msg.s_header.s_local_time + 1, 0 };
+				BalanceState state = { proc -> balance, get_lamport_time(), 0 };
 				proc -> history.s_history[ proc -> history.s_history_len++ ] = state;
 				break;
 			}
 			case STOP: {
 				done++; // This one
 
+				inc_lamport_time();
+
 				Message doneMsg;
 				fillMessage( &doneMsg, proc, DONE );
 				makeIPCLog( doneMsg.s_payload );
 				send_multicast( proc, &doneMsg );
 
-				fastForwardHistory( proc, msg.s_header.s_local_time + 1 );
+				fastForwardHistory( proc, get_lamport_time() );
 				break;
 			}
 			case DONE: {
@@ -99,15 +132,17 @@ void accountService( Process * const proc ) {
 		}
 	}
 
-	sprintf( LogBuf, log_received_all_done_fmt, get_physical_time(), proc -> localId );
+	sprintf( LogBuf, log_received_all_done_fmt, get_lamport_time(), proc -> localId );
 	makeIPCLog( LogBuf );
+
+	inc_lamport_time();
 
 	Message historyMsg;
 	historyMsg.s_header.s_payload_len = 2 + sizeof( BalanceState ) * proc -> history.s_history_len;
 	memcpy( historyMsg.s_payload, &( proc -> history ), historyMsg.s_header.s_payload_len );
 	historyMsg.s_header.s_type = BALANCE_HISTORY;
 	historyMsg.s_header.s_magic = MESSAGE_MAGIC;
-	historyMsg.s_header.s_local_time = get_physical_time();
+	historyMsg.s_header.s_local_time = get_lamport_time();
 	send( proc, PARENT_ID, &historyMsg );
 
 	closeTheOtherPipes( proc );
@@ -115,8 +150,8 @@ void accountService( Process * const proc ) {
 
 
 void fastForwardHistory( Process * const proc, const int newPresent ) {
-	if( proc -> history.s_history_len >= newPresent ) return;
-	while( proc -> history.s_history_len != newPresent ) {
+	if( proc -> history.s_history_len > newPresent ) return;
+	while( proc -> history.s_history_len <= newPresent ) {
 		BalanceState state = { proc -> balance, proc -> history.s_history_len, 0 };
 		proc -> history.s_history[ proc -> history.s_history_len++ ] = state;
 	}
@@ -134,15 +169,20 @@ void customerService( Process * const proc ) {
 		Message msg;
 		receive_any( proc, &msg );
 
-		switch ( msg.s_header.s_type ) {
+		set_max_lamport_time( msg.s_header.s_local_time );
+		inc_lamport_time();
+
+		switch( msg.s_header.s_type ) {
 			case STARTED: {
 				static int started = 0;
 				started++;
 				if( started == proc -> total ) {
-					sprintf( LogBuf, log_received_all_started_fmt, get_physical_time(), proc -> localId );
+					sprintf( LogBuf, log_received_all_started_fmt, get_lamport_time(), proc -> localId );
 					makeIPCLog( LogBuf );
 
 					bank_robbery( proc, proc -> total );
+
+					inc_lamport_time();
 
 					Message stopMsg;
 					fillMessage( &stopMsg, proc, STOP );
@@ -154,7 +194,7 @@ void customerService( Process * const proc ) {
 				static int done = 0;
 				done++;
 				if( done == proc -> total ) {
-					sprintf( LogBuf, log_received_all_done_fmt, get_physical_time(), proc -> localId );
+					sprintf( LogBuf, log_received_all_done_fmt, get_lamport_time(), proc -> localId );
 					makeIPCLog( LogBuf );
 				}
 				break;
@@ -181,6 +221,9 @@ void customerService( Process * const proc ) {
 
 
 void transfer( void* parent_data, local_id src, local_id dst,  balance_t amount ) {
+
+	inc_lamport_time();
+
 	TransferOrder order = { src, dst, amount };
 	Message transferMsg;
 	memcpy( transferMsg.s_payload, &order, sizeof( TransferOrder ) );
@@ -189,6 +232,9 @@ void transfer( void* parent_data, local_id src, local_id dst,  balance_t amount 
 
 	Message msg;
 	while( receive( parent_data, dst, &msg ) == IPC_PIPE_IS_EMPTY ) {}
+
+	set_max_lamport_time( msg.s_header.s_local_time );
+	inc_lamport_time();
 
 	if( msg.s_header.s_type != ACK ) {
 		fprintf( stderr, "ACK is missing! Received %d instead of %d\n", msg.s_header.s_type, ACK );
@@ -277,14 +323,14 @@ void waitForBranches() {
 void fillMessage( Message * msg, const Process * const proc, const MessageType msgType ) {
 	switch( msgType ) {
 		case STARTED:
-			sprintf( msg -> s_payload, log_started_fmt, get_physical_time(), proc -> localId, getpid(), getppid(), proc -> balance );
+			sprintf( msg -> s_payload, log_started_fmt, get_lamport_time(), proc -> localId, getpid(), getppid(), proc -> balance );
 			break;
 		case ACK:
 		case STOP:
 		case TRANSFER:
 			break;
 		case DONE:
-			sprintf( msg -> s_payload, log_done_fmt, get_physical_time(), proc -> localId, proc -> balance );
+			sprintf( msg -> s_payload, log_done_fmt, get_lamport_time(), proc -> localId, proc -> balance );
 			break;
 		default:
 			sprintf( msg -> s_payload, "Unsupported type of message\n" );
@@ -292,7 +338,7 @@ void fillMessage( Message * msg, const Process * const proc, const MessageType m
 	}
 	msg -> s_header.s_type = msgType;
 	msg -> s_header.s_magic = MESSAGE_MAGIC;
-	msg -> s_header.s_local_time = get_physical_time();
+	msg -> s_header.s_local_time = get_lamport_time();
 	msg -> s_header.s_payload_len = strlen( msg -> s_payload );
 }
 

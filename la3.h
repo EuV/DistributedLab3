@@ -60,3 +60,8 @@ int Pipes[ MAX_PROCESS_ID + 1 ][ MAX_PROCESS_ID + 1][ 2 ];
 int EventsLog;
 int PipesLog;
 char LogBuf[ BUF_SIZE ];
+
+
+timestamp_t lamportTime;
+void inc_lamport_time();
+void set_max_lamport_time( timestamp_t );
