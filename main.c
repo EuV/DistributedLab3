@@ -16,6 +16,19 @@ void set_max_lamport_time( timestamp_t msgTime ) {
 	}
 }
 
+
+void fixed_multicast( Process* proc, Message * msg ) {
+	for ( local_id dst = PARENT_ID; dst <= proc -> total; dst++ ) {
+		if ( dst == proc -> localId ) continue;
+
+		inc_lamport_time();
+		msg -> s_header.s_local_time = get_lamport_time();
+
+		send( proc, dst, msg );
+	}
+}
+
+
 int main( int argc, char* argv[] ) {
 
 	EventsLog = open( evengs_log, O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0777 );
@@ -47,7 +60,7 @@ void accountService( Process * const proc ) {
 	Message startedMsg;
 	fillMessage( &startedMsg, proc, STARTED );
 	makeIPCLog( startedMsg.s_payload );
-	send_multicast( proc, &startedMsg );
+	fixed_multicast( proc, &startedMsg );
 
 	// Receive all the messages
 	int done = 0;
@@ -116,7 +129,7 @@ void accountService( Process * const proc ) {
 				Message doneMsg;
 				fillMessage( &doneMsg, proc, DONE );
 				makeIPCLog( doneMsg.s_payload );
-				send_multicast( proc, &doneMsg );
+				fixed_multicast( proc, &doneMsg );
 
 				fastForwardHistory( proc, get_lamport_time() );
 				break;
@@ -158,6 +171,40 @@ void fastForwardHistory( Process * const proc, const int newPresent ) {
 }
 
 
+void extendHistoryTillEnd( AllHistory* allHistory ) {
+
+	timestamp_t maxTime = 0;
+	for( int i = 0; i < allHistory -> s_history_len; i++ ) {
+		for( int j = 0; j < allHistory -> s_history[ i ].s_history_len; j++ ) {
+			const BalanceState* state = &allHistory -> s_history[ i ].s_history[ j ];
+			if( maxTime < state -> s_time ) {
+				maxTime = state -> s_time;
+			}
+		}
+	}
+
+
+	for( int i = 0; i < allHistory -> s_history_len; i++ ) {
+
+		allHistory -> s_history[ i ].s_history_len = maxTime;
+		BalanceState* prevState = &allHistory -> s_history[ i ].s_history[ 0 ];
+
+		for( int j = 0; j <= maxTime; j++ ) {
+
+			BalanceState* state = &allHistory -> s_history[ i ].s_history[ j ];
+
+			if( state -> s_time != j ) {
+				state -> s_time = j;
+				state -> s_balance = prevState -> s_balance;
+				state -> s_balance_pending_in = prevState -> s_balance_pending_in;
+			}
+
+			prevState = state;
+		}
+	}
+}
+
+
 void customerService( Process * const proc ) {
 
 	closeUnusedPipes( proc );
@@ -186,7 +233,7 @@ void customerService( Process * const proc ) {
 
 					Message stopMsg;
 					fillMessage( &stopMsg, proc, STOP );
-					send_multicast( proc, &stopMsg );
+					fixed_multicast( proc, &stopMsg );
 				}
 				break;
 			}
@@ -212,6 +259,7 @@ void customerService( Process * const proc ) {
 		}
 	}
 
+	extendHistoryTillEnd( &allHistory );
 	print_history( &allHistory );
 
 	waitForBranches();

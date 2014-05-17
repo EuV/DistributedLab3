@@ -1,6 +1,6 @@
 #include "la3.h"
 
-int send( void * self, local_id dst, const Message * msg) {
+int send( void* self, local_id dst, const Message* msg) {
 
 	Process * proc = self;
 
@@ -13,7 +13,7 @@ int send( void * self, local_id dst, const Message * msg) {
 }
 
 
-int send_multicast( void * self, const Message * msg ) {
+int send_multicast( void* self, const Message* msg ) {
 
 	Process * proc = self;
 
@@ -29,7 +29,7 @@ int send_multicast( void * self, const Message * msg ) {
 }
 
 
-int receive( void * self, local_id from, Message * msg ) {
+int receive( void* self, local_id from, Message* msg ) {
 
 	Process * proc = self;
 
@@ -54,7 +54,7 @@ int receive( void * self, local_id from, Message * msg ) {
 }
 
 
-int receive_any( void * self, Message * msg ) {
+int receive_any( void* self, Message* msg ) {
 
 	Process * proc = self;
 	static local_id sender = PARENT_ID;
