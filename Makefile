@@ -11,5 +11,5 @@ tar: main.c la3.h ipc.c clean
 clean:
 	-rm -rf *.o *.log pa3 pa3.tar.gz
 
-
-#export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:~/pa2/DistributedLab2" LD_PRELOAD=~/pa2/DistributedLab2/libruntime.so
+lib:
+	export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:~/pa3/DistributedLab3" LD_PRELOAD=~/pa3/DistributedLab3/libruntime.so
